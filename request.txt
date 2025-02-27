@@ -1,0 +1,35 @@
+- cho tính năng thông suốt đoạn chat liên tục không bị ngắt quãng bởi mỗi lần đặt câu hỏi cần bấm start
+- AI tập trung vào lĩnh vực mua sắm như là shopee lazada 
+- sử dụng gooogle search engine để cho con chatbot tìm kiếm trên google hoặc có thể sử dụng trực tiếp dùng gemini API search google
+- thêm ký hiệu loading respone cho chatbot dành cho cả 2 text và audio ❌
+- xóa url khỏi audio ✔️
+- giới hạn token gemini ✔️
+
+- animated loading respone ❌
+- mặc định 1.5x ✔️
+- tiếp tục chuyển sang audio sau khi đã trả về text và ngược lại ✔️
+- ẩn nút inline keyboard của text và audio sau khi người dùng đã bấm và hiển thị lại khi trả kết quả ✔️
+- xóa luôn /start và /stop người dùng ko cần dùng để bắt đầu vả kết thúc ✔️
+- xóa file media sau 5p ✔️
+- thêm file requirement.txt ✔️
+- kết nối docker để deploy code
+- Token chưa cộng thêm
+
+- tích hợp google search engine đưa ra 2 lựa chọn cho người dùng muốn search google hay không hoặc dùng gemini như bình thường
+- thêm nút refresh token ✔️
+- mở rộng thời gian time out ✔️
+- nút search, tính năng thêm API cho từng user lưu vào file json bao gồm thông tin id user, API gemini, API google search engine
+
+- test file usd
+
+
+
+
+
+
+
+
+
+
+
+dùng google search engine tìm kiếm thông tin trên google, giả sử như người dùng muốn tìm kiếm về thời tiết chatbot sẽ mở google và tìm kiếm theo vị trí của người dùng, hoặc nếu người dùng tìm kiếm thông tin về sản phẩm muốn mua chatbot sẽ trả về hình ảnh và đường link để mua 

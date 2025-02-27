@@ -1,0 +1,247 @@
+import os
+import asyncio
+import uuid
+import re
+from dotenv import load_dotenv
+load_dotenv()
+from gtts import gTTS
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ConversationHandler,
+    CallbackQueryHandler,
+    ContextTypes
+)
+import google.generativeai as genai
+from langdetect import detect, LangDetectException
+
+# Configure Gemini API
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=GEMINI_API_KEY)
+
+# Telegram Bot Token
+TELE_TOKEN = os.getenv("TELE_TOKEN")
+SAVE_DIR = "./data"
+os.makedirs(SAVE_DIR, exist_ok=True)    
+
+# Conversation states
+PROCESSING_QUESTION = 1
+MAX_TOKENS = 10000
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reset conversation and start fresh"""
+    context.user_data.clear()
+    context.user_data["total_used_tokens"] = 0
+    await update.message.reply_text("Gửi cho tôi câu hỏi của bạn:")
+    return PROCESSING_QUESTION
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle initial message without /start command"""
+    context.user_data["total_used_tokens"] = 0
+    return await process_question(update, context)
+
+async def process_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Main question processing flow"""
+    question = update.message.text
+    context.user_data["question"] = question
+    
+    # Start loading animation
+    loading_task = asyncio.create_task(animate_loading(update, context))
+    context.user_data["loading_task"] = loading_task
+
+    # Detect language
+    try:
+        lang = detect(question)
+        context.user_data["lang"] = lang
+    except LangDetectException:
+        lang = "en"
+        context.user_data["lang"] = lang
+
+    # Process question
+    return await generate_response(update, context)
+
+async def animate_loading(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Animated loading message"""
+    message = await update.message.reply_text("Đang xử lý")
+    dots = 0
+    while True:
+        dots = (dots + 1) % 4
+        try:
+            await message.edit_text("Đang xử lý" + "." * dots)
+            await asyncio.sleep(0.5)
+        except:
+            break
+
+async def generate_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate and handle response"""
+    # Stop loading animation
+    if "loading_task" in context.user_data:
+        context.user_data["loading_task"].cancel()
+        del context.user_data["loading_task"]
+
+    # Show response type selector
+    keyboard = [
+        [
+            InlineKeyboardButton("Text", callback_data="text"),
+            InlineKeyboardButton("Audio", callback_data="audio"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.message.reply_text("Chọn định dạng trả lời:", reply_markup=reply_markup)
+    else:
+        await context.bot.send_message(chat_id=update.effective_chat.id, 
+                                     text="Chọn định dạng trả lời:", 
+                                     reply_markup=reply_markup)
+    
+    return PROCESSING_QUESTION
+
+async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle response type selection"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Remove original keyboard
+    await query.edit_message_reply_markup(reply_markup=None)
+    
+    response_type = query.data
+    question = context.user_data.get("question", "")
+    lang = context.user_data.get("lang", "en")
+    
+    # Start processing animation
+    processing_msg = await query.message.reply_text("🔄 Đang tạo phản hồi...")
+    
+    try:
+        # Token management
+        total_used = context.user_data.get("total_used_tokens", 0)
+        if total_used >= MAX_TOKENS:
+            await processing_msg.edit_text("❌ Đã hết token khả dụng!")
+            return await end_conversation(update, context)
+
+        # Generate response
+        model = genai.GenerativeModel("gemini-pro")
+        response = model.generate_content(question[:1500])  # Truncate long questions
+        
+        if not response.text:
+            raise ValueError("Empty response from API")
+            
+        response_text = response.text.strip().replace('*', '')
+        response_text = remove_urls(response_text)
+        
+        # Update token count
+        used_tokens = estimate_tokens(question) + estimate_tokens(response_text)
+        context.user_data["total_used_tokens"] = total_used + used_tokens
+        
+        # Add token info
+        response_text += f"\n\n🔸 Token đã dùng: {context.user_data['total_used_tokens']}/{MAX_TOKENS}"
+        context.user_data["last_response"] = response_text
+
+        # Handle response type
+        if response_type == "audio":
+            await send_audio_response(query, response_text, lang, context)
+        else:
+            await processing_msg.edit_text(response_text)
+            
+        # Show conversion options
+        keyboard = [
+            [
+                InlineKeyboardButton("🔊 Chuyển sang Audio", callback_data="convert_audio"),
+                InlineKeyboardButton("📝 Chuyển sang Text", callback_data="convert_text")
+            ]
+        ]
+        await query.message.reply_text("Chọn định dạng khác:", 
+                                     reply_markup=InlineKeyboardMarkup(keyboard))
+        
+    except Exception as e:
+        await processing_msg.edit_text(f"❌ Lỗi: {str(e)}")
+        return await end_conversation(update, context)
+    
+    return PROCESSING_QUESTION
+
+async def send_audio_response(query, text, lang, context):
+    """Tạo và gửi phản hồi âm thanh."""
+    # Loại bỏ URL khỏi văn bản dành cho âm thanh
+    text_for_audio = remove_urls(text, remove=True)
+    
+    # Tạo tệp âm thanh từ văn bản đã loại bỏ URL
+    audio_path = os.path.join(SAVE_DIR, f"response_{uuid.uuid4()}.mp3")
+    tts = gTTS(text=text_for_audio, lang='vi' if lang == 'vi' else 'en', slow=False)
+    tts.save(audio_path)
+    
+    # Gửi tệp âm thanh cho người dùng
+    await context.bot.send_voice(chat_id=query.message.chat_id, voice=open(audio_path, "rb"))
+    
+    # Xóa tệp âm thanh sau một khoảng thời gian
+    asyncio.create_task(delete_file_after_delay(audio_path))
+
+async def handle_conversion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle format conversion"""
+    query = update.callback_query
+    await query.answer()
+    
+    conversion_type = query.data.split('_')[1]
+    response_text = context.user_data.get("last_response", "")
+    
+    if conversion_type == "audio":
+        await send_audio_response(query, response_text, 
+                                context.user_data.get("lang", "en"), context)
+    else:
+        await query.message.reply_text(response_text)
+    
+    # Remove conversion keyboard after use
+    await query.edit_message_reply_markup(reply_markup=None)
+    return PROCESSING_QUESTION
+
+async def end_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clean up and end conversation"""
+    context.user_data.clear()
+    await update.message.reply_text("💬 Kết thúc hội thoại. Gửi tin nhắn bất kỳ để bắt đầu lại!")
+    return ConversationHandler.END
+
+import re
+
+def remove_urls(text, remove=True):
+    """Loại bỏ hoặc giữ lại các URL trong văn bản dựa trên tham số 'remove'."""
+    if remove:
+        url_pattern = r'https?://\S+|www\.\S+'
+        return re.sub(url_pattern, "", text)
+    return text
+
+def estimate_tokens(text):
+    """Estimate tokens based on word count"""
+    return len(text.split()) + 1
+
+async def delete_file_after_delay(file_path: str, delay: int = 300):
+    """Delete file after specified delay"""
+    await asyncio.sleep(delay)
+    try:
+        os.remove(file_path)
+    except:
+        pass
+
+def main():
+    app = Application.builder().token(TELE_TOKEN).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)],
+        states={
+            PROCESSING_QUESTION: [
+                CallbackQueryHandler(handle_response, pattern="^(text|audio)$"),
+                CallbackQueryHandler(handle_conversion, pattern="^convert_(text|audio)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, process_question)
+            ]
+        },
+        fallbacks=[CommandHandler("cancel", end_conversation)],
+        allow_reentry=True
+    )
+
+    app.add_handler(conv_handler)
+    app.add_handler(CommandHandler("start", start))
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
