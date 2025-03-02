@@ -1,0 +1,120 @@
+async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    translation = load_language(context.user_data.get("language", "en"))
+    """Xử lý định dạng trả lời (text hay audio) và gọi API Gemini."""
+    query = update.callback_query
+    await query.answer()
+    response_data = query.data
+
+    # Kiểm tra token phiên đã hết hạn hay chưa
+    session_token = context.user_data.get("session_token", {})
+    if session_token.get("expires_at", 0) < time.time():
+        await query.edit_message_text(translation["session_format"])
+        return ASK_RESPONSE_TYPE
+
+    if response_data == "refresh_token":
+        context.user_data["session_token"] = generate_session_token()
+        context.user_data["total_used_tokens"] = 0
+        await query.edit_message_text(
+            text=translation["token_refreshed"],
+            reply_markup=None
+        )
+        return ASK_RESPONSE_TYPE
+
+    is_initial = response_data in ["text", "audio"]
+
+    # Ẩn inline keyboard của tin nhắn gốc
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    question = context.user_data.get("question", "")
+    detected_lang = context.user_data.get("detected_lang", "en")
+
+    total_used_tokens = context.user_data.get("total_used_tokens", 0)
+    truncated_question = truncate_text(question)
+    input_tokens = estimate_tokens(truncated_question)
+    if total_used_tokens + input_tokens > MAX_TOKENS:
+        await query.edit_message_text(translation["token_over"])
+        return ConversationHandler.END
+
+    # Sử dụng API Gemini của người dùng (nếu đã đăng nhập và có API riêng)
+    user_credentials = context.user_data.get("user_credentials", {})
+    user_api_key = user_credentials.get("gemini_api", GEMINI_API_KEY)
+    genai.configure(api_key=str(user_api_key))
+
+    # Nếu chưa có phản hồi từ Gemini, gọi API
+    if "gemini_response" not in context.user_data:
+        loading_temp = await context.bot.send_message(chat_id=query.message.chat_id, text=translation["fetching_api"])
+        model = genai.GenerativeModel("gemini-exp-1206")
+        try:
+            response = model.generate_content(truncated_question, generation_config={"max_output_tokens": MAX_TOKENS})
+            response_text = response.text.strip() if hasattr(response, "text") else translation["cannot_generate"]
+            response_text = response_text.replace('*', '')
+            output_tokens = estimate_tokens(response_text)
+            total_used_tokens += input_tokens + output_tokens
+            context.user_data["total_used_tokens"] = total_used_tokens
+            # Thêm thông tin token vào phản hồi
+            response_text += f"\n\n🔹 {translation['used_token']} {total_used_tokens}/{MAX_TOKENS}"
+            context.user_data["gemini_response"] = response_text
+            # Xóa tin nhắn loading tạm thời
+            try:
+                await context.bot.delete_message(chat_id=query.message.chat_id, message_id=loading_temp.message_id)
+            except Exception as e:
+                print(f"{translation['cannot_delete']}, {e}")
+        except Exception as e:
+            await query.edit_message_text(f"Lỗi: {str(e)}")
+            return ConversationHandler.END
+    else:
+        response_text = context.user_data["gemini_response"]
+
+    # Xử lý định dạng trả lời theo yêu cầu
+    if response_data in ["text", "convert_text"]:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(translation["hear_audio"], callback_data="convert_audio"),
+             InlineKeyboardButton("Refresh Token", callback_data="refresh_token")]
+        ])
+        # Gửi phản hồi thực sự sau khi xử lý xong
+        try:
+            await query.edit_message_text(text=response_text, reply_markup=keyboard)
+        except Exception:
+            await context.bot.send_message(chat_id=query.message.chat_id, text=response_text, reply_markup=keyboard)
+
+    # Xử lý theo audio
+    elif response_data in ["audio", "convert_audio"]:
+        try:
+            await query.edit_message_text(text=translation["sending_audio"])
+        except Exception:
+            pass
+        tts_text = remove_urls(response_text)
+        tts_lang = "vi" if detected_lang == "vi" else "en"
+        audio_path = os.path.join(SAVE_DIR, f"response_{uuid.uuid4()}.mp3")
+        try:
+            tts = gTTS(tts_text, lang=tts_lang, slow=False)
+            tts.save(audio_path)
+        except Exception as e:
+            await context.bot.send_message(chat_id=query.message.chat_id, text=f"{translation['audio_error']}, {str(e)} ")
+            return ConversationHandler.END
+        # Dùng send_audio thay vì send_voice vì file mp3 không tương thích với send_voice
+        with open(audio_path, "rb") as audio_file:
+            await context.bot.send_audio(chat_id=query.message.chat_id, audio=audio_file)
+        asyncio.create_task(delete_file_after_delay(audio_path))
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(translation["show_text"], callback_data="convert_text"),
+             InlineKeyboardButton("Refresh Token", callback_data="refresh_token")]
+        ])
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=translation["audio_sent"],
+            reply_markup=keyboard
+        )
+
+    if is_initial:
+        if total_used_tokens < MAX_TOKENS:
+            await context.bot.send_message(chat_id=query.message.chat_id, text=translation["ask_next"])
+            return ASK_RESPONSE_TYPE
+        else:
+            await context.bot.send_message(chat_id=query.message.chat_id, text=translation["chat_over"])
+            return ConversationHandler.END
+    else:
+        return ASK_RESPONSE_TYPE

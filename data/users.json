@@ -1,0 +1,10 @@
+{
+    "LysLama": {
+        "hashed_password": "$2b$12$FIhE.rrfMvufcU4YBuYW3ufZM1HXn4GfaPZw9RwxtQtieLH2gqCI6",
+        "gemini_api": "AIzaSyC44sYMJMpftQSjIP2HoZ-x2RYBAsmc-Ig"
+    },
+    "admin": {
+        "hashed_password": "$2b$12$KIaReNWDVOhUOEw.Ve6XUOtNO4i3ulrdtwAj8SAO6DiVlQHPmweJG",
+        "gemini_api": "AIzaSyC44sYMJMpftQSjIP2HoZ-x2RYBAsmc-Ig"
+    }
+}

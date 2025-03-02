@@ -16,6 +16,7 @@ from telegram.ext import (
     ConversationHandler,
     CallbackQueryHandler,
     CommandHandler,
+    ContextTypes,
 )
 import google.generativeai as genai
 from langdetect import detect, LangDetectException
@@ -23,6 +24,25 @@ from langdetect import detect, LangDetectException
 # ============================
 # CẤU HÌNH VÀ ĐỊNH NGHĨA TOÀN CỤC
 # ============================
+
+# Đường dẫn thư mục chứa file ngôn ngữ
+SAVE_DIR = "./data"  # Thay đổi nếu cần
+LANG_DIR = os.path.join(SAVE_DIR, "lang")
+os.makedirs(LANG_DIR, exist_ok=True)
+
+# Hàm tải ngôn ngữ
+def load_language(language_code):
+    """Đọc dữ liệu ngôn ngữ từ file JSON."""
+    lang_file = os.path.join(LANG_DIR, f"lang_{language_code}.json")
+    try:
+        with open(lang_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Không tìm thấy file ngôn ngữ cho {language_code}. Dùng tiếng Anh mặc định.")
+        return load_language("en")  # Mặc định tiếng Anh nếu không tìm thấy
+    except Exception as e:
+        print(f"Lỗi đọc file ngôn ngữ: {e}")
+        return {}
 
 # Thông tin mặc định từ biến môi trường (cho các yêu cầu khác)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -48,7 +68,7 @@ MAX_TOKENS = 50000       # Giới hạn số token cho mỗi hội thoại
 TOKEN_LIFETIME = 3600    # Thời gian sống của token (1 giờ)
 
 # Các trạng thái cho quá trình xác thực (đăng nhập/đăng ký)
-AUTH_CHOICE, REGISTER_ID, REGISTER_PASSWORD, REGISTER_GEMINI, LOGIN_ID, LOGIN_PASSWORD = range(10, 16)
+CHOOSE_LANGUAGE, AUTH_CHOICE, REGISTER_ID, REGISTER_PASSWORD, REGISTER_GEMINI, LOGIN_ID, LOGIN_PASSWORD = range(10, 17)
 
 # ============================
 # HÀM HỖ TRỢ CHO VIỆC QUẢN LÝ NGƯỜI DÙNG
@@ -113,101 +133,161 @@ async def delete_file_after_delay(file_path: str, delay: int = 300):
 # PHẦN XÁC THỰC: ĐĂNG NHẬP / ĐĂNG KÝ
 # ============================
 
-async def start_auth(update: Update, context):
+async def auto_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Chỉ được kích hoạt khi người dùng gửi lệnh /start.
+    Nếu chưa đăng nhập, hiển thị chọn ngôn ngữ.
+    Nếu đã đăng nhập, chuyển trực tiếp sang phần hỏi đáp Q&A.
+    """
+    if not context.user_data.get("authenticated"):
+        # Hiển thị chọn ngôn ngữ
+        supported_languages = {
+            "en": "English",
+            "vi": "Tiếng Việt"
+        }
+        keyboard = [
+            [InlineKeyboardButton(name, callback_data=f"lang_{code}")]
+            for code, name in supported_languages.items()
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "Vui lòng chọn ngôn ngữ / Please select your language:",
+            reply_markup=reply_markup
+        )
+        return CHOOSE_LANGUAGE
+    else:
+        return await ask_response_type(update, context)
+
+async def choose_language(update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        query = update.callback_query
+        await query.answer()
+        language_code = query.data.split("_")[1]
+        context.user_data["language"] = language_code
+        
+        translation = load_language(language_code)
+        
+        keyboard = [
+            [InlineKeyboardButton(translation["login"], callback_data="login"),
+             InlineKeyboardButton(translation["register"], callback_data="register")]
+        ]
+        
+        await  query.edit_message_text(
+            f"{translation['welcome']}\n{translation['choose_option']}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return AUTH_CHOICE
+    except Exception as e:
+        print(f"Lỗi trong choose_language: {str(e)}")
+        await update.callback_query.message.reply_text("Đã xảy ra lỗi. Vui lòng thử lại.")
+        return ConversationHandler.END
+
+async def start_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý lựa chọn ngôn ngữ."""
+    query = update.callback_query
+    await query.answer()
+    language_code = query.data.split("_")[1]  # Lấy "en" hoặc "vi" từ "lang_en", "lang_vi"
+    context.user_data["language"] = language_code
+    
+    # Tải ngôn ngữ
+    translation = load_language(language_code)
+
     """Lệnh /start hoặc callback từ nút 'Đăng nhập / Đăng ký': Hiển thị lựa chọn đăng nhập hay đăng ký."""
     keyboard = [
         [
-            InlineKeyboardButton("Đăng nhập", callback_data="login"),
-            InlineKeyboardButton("Đăng ký", callback_data="register"),
+            InlineKeyboardButton(translation["login"], callback_data="login"),
+            InlineKeyboardButton(translation["register"], callback_data="register"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     # Kiểm tra xem update đến từ message hay callback query
     if update.message:
-        await update.message.reply_text("Chào mừng! Vui lòng chọn:", reply_markup=reply_markup)
+        await update.message.reply_text(f"{translation['welcome']}\n{translation['choose_option']}", reply_markup=reply_markup)
     elif update.callback_query:
         await update.callback_query.answer()  # Trả lời callback query
-        await update.callback_query.edit_message_text("Chào mừng! Vui lòng chọn:", reply_markup=reply_markup)
+        await update.callback_query.edit_message_text(f"{translation['welcome']}\n{translation['choose_option']}", reply_markup=reply_markup)
     return AUTH_CHOICE
 
-async def auth_choice(update: Update, context):
-    """Xử lý lựa chọn đăng nhập hoặc đăng ký."""
+async def auth_choice(update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý lựa chọn đăng nhập/đăng ký."""
     query = update.callback_query
     await query.answer()
     choice = query.data
-    if choice == "register":
-        await query.edit_message_text("Đăng ký:\nVui lòng nhập ID của bạn:")
-        return REGISTER_ID
-    elif choice == "login":
-        await query.edit_message_text("Đăng nhập:\nVui lòng nhập ID của bạn:")
+    translation = load_language(context.user_data.get("language", "en"))
+    
+    if choice == "login":
+        await query.edit_message_text(f"{translation['login']}:\n{translation['enter_id']}")
         return LOGIN_ID
+    elif choice == "register":
+        await query.edit_message_text(f"{translation['register']}:\n{translation['enter_id']}")
+        return REGISTER_ID
 
-async def register_id(update: Update, context):
+async def register_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    translation = load_language(context.user_data.get("language", "en"))
+
     """Nhận ID người dùng trong quá trình đăng ký."""
     user_id = update.message.text.strip()
     users = load_users_data()
     if user_id in users:
-        await update.message.reply_text("ID này đã tồn tại. Vui lòng chọn đăng nhập hoặc thử ID khác.")
+        await update.message.reply_text(translation["id_exists"])
         return ConversationHandler.END
     context.user_data["reg_id"] = user_id
-    await update.message.reply_text("Vui lòng nhập mật khẩu của bạn:")
+    await update.message.reply_text(translation["enter_password"])
     return REGISTER_PASSWORD
 
-async def register_password(update: Update, context):
+async def register_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    translation = load_language(context.user_data.get("language", "en"))
     """Nhận mật khẩu của người dùng trong quá trình đăng ký."""
     password = update.message.text.strip()
     context.user_data["reg_password"] = password
-    await update.message.reply_text("Vui lòng nhập API Gemini của bạn:")
+    await update.message.reply_text(translation["enter_api"])
     return REGISTER_GEMINI
 
-async def register_gemini(update: Update, context):
-    """Hoàn thiện đăng ký: lưu thông tin người dùng vào file JSON sau khi mã hóa mật khẩu."""
+async def register_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    translation = load_language(context.user_data.get("language", "en"))
     gemini_api = update.message.text.strip()
     user_id = context.user_data.get("reg_id")
     password = context.user_data.get("reg_password")
     
-    # Mã hóa mật khẩu
     hashed_pass = hash_password(password)
     
-    # Lưu vào file JSON
     users = load_users_data()
     users[user_id] = {
-        "hashed_password": hashed_pass.decode("utf-8"),  # Lưu dưới dạng chuỗi
+        "hashed_password": hashed_pass.decode("utf-8"),
         "gemini_api": gemini_api
     }
     save_users_data(users)
     
-    # Đánh dấu người dùng đã đăng nhập thành công
     context.user_data["authenticated"] = True
     context.user_data["user_credentials"] = {
         "id": user_id,
         "gemini_api": gemini_api
     }
-    # Khởi tạo token phiên cho việc sử dụng API Gemini
     context.user_data["session_token"] = generate_session_token()
     context.user_data["total_used_tokens"] = 0
-    
-    await update.message.reply_text("Đăng ký thành công! Bạn đã đăng nhập và có thể sử dụng bot để đặt câu hỏi.")
-    return ConversationHandler.END
+    await update.message.reply_text(translation["register_success"])
+    # Prompt the user to ask a question
+    await update.message.reply_text(translation.get("ask_question", "Please type your question:"))
+    return ASK_RESPONSE_TYPE
 
-async def login_id(update: Update, context):
+async def login_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    translation = load_language(context.user_data.get("language", "en"))
     """Nhận ID người dùng trong quá trình đăng nhập."""
     user_id = update.message.text.strip()
     context.user_data["login_id"] = user_id
-    await update.message.reply_text("Vui lòng nhập mật khẩu của bạn:")
+    await update.message.reply_text(translation["enter_password"])
     return LOGIN_PASSWORD
 
-async def login_password(update: Update, context):
-    """Kiểm tra mật khẩu khi đăng nhập."""
+async def login_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    translation = load_language(context.user_data.get("language", "en"))
     password = update.message.text.strip()
     user_id = context.user_data.get("login_id")
     users = load_users_data()
     
     if user_id not in users:
-        await update.message.reply_text("ID không tồn tại. Vui lòng đăng ký hoặc kiểm tra lại.")
+        await update.message.reply_text(translation["id_not_exists"])
         return ConversationHandler.END
     
-    # Lấy mật khẩu đã mã hóa từ file
     stored_hash = users[user_id]["hashed_password"].encode("utf-8")
     if check_password(password, stored_hash):
         gemini_api = users[user_id]["gemini_api"]
@@ -216,30 +296,27 @@ async def login_password(update: Update, context):
             "id": user_id,
             "gemini_api": gemini_api
         }
-        # Khởi tạo token phiên cho việc sử dụng API Gemini
         context.user_data["session_token"] = generate_session_token()
         context.user_data["total_used_tokens"] = 0
-        await update.message.reply_text("Đăng nhập thành công! Bây giờ, bạn có thể đặt câu hỏi để sử dụng API Gemini.")
+        await update.message.reply_text(translation["login_success"])
+        # Prompt the user to ask a question
+        await update.message.reply_text(translation.get("ask_question", "Please type your question:"))
+        return ASK_RESPONSE_TYPE
     else:
-        await update.message.reply_text("Mật khẩu không đúng. Vui lòng thử lại.")
-    return ConversationHandler.END
+        await update.message.reply_text(translation["wrong_password"])
+        return ConversationHandler.END
 
 # ============================
 # PHẦN GIAO TIẾP VỚI API GEMINI (Q&A)
 # ============================
 
-async def ask_response_type(update: Update, context):
-    """Xử lý tin nhắn của người dùng cho câu hỏi gửi tới API Gemini."""
-    # Kiểm tra xem người dùng đã đăng nhập chưa
+async def ask_response_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    translation = load_language(context.user_data.get("language", "en"))
+
+    """Xử lý câu hỏi sau khi đã đăng nhập"""
+    # Kiểm tra lại trạng thái đăng nhập
     if not context.user_data.get("authenticated"):
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Đăng nhập / Đăng ký", callback_data="start_auth")]
-        ])
-        await update.message.reply_text(
-            "Vui lòng đăng nhập hoặc đăng ký để sử dụng bot:",
-            reply_markup=keyboard
-        )
-        return ConversationHandler.END
+        return await auto_start(update, context)
 
     question = update.message.text
     context.user_data["question"] = question
@@ -251,13 +328,13 @@ async def ask_response_type(update: Update, context):
     else:
         context.user_data["session_token"]["expires_at"] = time.time() + TOKEN_LIFETIME
 
-    loading_message = await update.message.reply_text("Đang xử lý câu hỏi...")
+    loading_message = await update.message.reply_text(translation["processing_question"])
     try:
-        lang = detect(question)
-        context.user_data["lang"] = lang
+        detect_lang = detect(question)
+        context.user_data["detected_lang"] = detect_lang
     except LangDetectException:
-        lang = "en"
-        context.user_data["lang"] = lang
+        detect_lang = "en"
+        context.user_data["detected_lang"] = detect_lang
 
     keyboard = [
         [
@@ -267,11 +344,13 @@ async def ask_response_type(update: Update, context):
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await loading_message.edit_text("Chọn định dạng trả lời:", reply_markup=reply_markup)
+    await loading_message.edit_text(translation["choose_format"], reply_markup=reply_markup)
     
     return ASK_RESPONSE_TYPE
 
-async def handle_response(update: Update, context):
+async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    translation = load_language(context.user_data.get("language", "en"))
+
     """Xử lý định dạng trả lời (text hay audio) và gọi API Gemini."""
     query = update.callback_query
     await query.answer()
@@ -280,14 +359,14 @@ async def handle_response(update: Update, context):
     # Kiểm tra token phiên đã hết hạn hay chưa
     session_token = context.user_data.get("session_token", {})
     if session_token.get("expires_at", 0) < time.time():
-        await query.edit_message_text("Phiên làm việc đã hết hạn. Vui lòng làm mới token!")
+        await query.edit_message_text(translation ["session_format"])
         return ASK_RESPONSE_TYPE
 
     if response_data == "refresh_token":
         context.user_data["session_token"] = generate_session_token()
         context.user_data["total_used_tokens"] = 0
         await query.edit_message_text(
-            text="Token đã được làm mới thành công!\nBạn có thể tiếp tục đặt câu hỏi:",
+            text=translation["token_refreshed"],
             reply_markup=None
         )
         return ASK_RESPONSE_TYPE
@@ -301,13 +380,13 @@ async def handle_response(update: Update, context):
         pass
 
     question = context.user_data.get("question", "")
-    lang = context.user_data.get("lang", "en")
+    detected_lang = context.user_data.get("detected_lang", "en")
 
     total_used_tokens = context.user_data.get("total_used_tokens", 0)
     truncated_question = truncate_text(question)
     input_tokens = estimate_tokens(truncated_question)
     if total_used_tokens + input_tokens > MAX_TOKENS:
-        await query.edit_message_text("Bạn đã hết số token cho phép trong hội thoại này.")
+        await query.edit_message_text(translation["token_over"])
         return ConversationHandler.END
 
     # Sử dụng API Gemini của người dùng (nếu đã đăng nhập và có API riêng)
@@ -317,23 +396,23 @@ async def handle_response(update: Update, context):
 
     # Nếu chưa có phản hồi từ Gemini, gọi API
     if "gemini_response" not in context.user_data:
-        loading_temp = await context.bot.send_message(chat_id=query.message.chat_id, text="Đang lấy phản hồi từ API...")
+        loading_temp = await context.bot.send_message(chat_id=query.message.chat_id, text=translation["fetching_api"])
         model = genai.GenerativeModel("gemini-exp-1206")
         try:
             response = model.generate_content(truncated_question, generation_config={"max_output_tokens": MAX_TOKENS})
-            response_text = response.text.strip() if hasattr(response, "text") else "Xin lỗi, tôi không thể tạo phản hồi."
+            response_text = response.text.strip() if hasattr(response, "text") else translation ["cannot_generate"]
             response_text = response_text.replace('*', '')
             output_tokens = estimate_tokens(response_text)
             total_used_tokens += input_tokens + output_tokens
             context.user_data["total_used_tokens"] = total_used_tokens
             # Thêm thông tin token vào phản hồi
-            response_text += f"\n\n🔹 Token đã dùng: {total_used_tokens}/{MAX_TOKENS}"
+            response_text += f"\n\n🔹 {translation['used_token']} {total_used_tokens}/{MAX_TOKENS}"
             context.user_data["gemini_response"] = response_text
             # Xóa tin nhắn loading tạm thời
             try:
                 await context.bot.delete_message(chat_id=query.message.chat_id, message_id=loading_temp.message_id)
             except Exception as e:
-                print(f"Không thể xóa tin nhắn loading: {e}")
+                print(f"{translation['cannot_delete']}, {e}")
         except Exception as e:
             await query.edit_message_text(f"Lỗi: {str(e)}")
             return ConversationHandler.END
@@ -343,7 +422,7 @@ async def handle_response(update: Update, context):
     # Xử lý định dạng trả lời theo yêu cầu
     if response_data in ["text", "convert_text"]:
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Nghe Audio", callback_data="convert_audio"),
+            [InlineKeyboardButton(translation["hear_audio"], callback_data="convert_audio"),
              InlineKeyboardButton("Refresh Token", callback_data="refresh_token")]
         ])
         # Gửi phản hồi thực sự sau khi xử lý xong
@@ -352,40 +431,39 @@ async def handle_response(update: Update, context):
         except Exception:
             await context.bot.send_message(chat_id=query.message.chat_id, text=response_text, reply_markup=keyboard)
 
-            
     # Xử lý theo audioaudio
     elif response_data in ["audio", "convert_audio"]:
         try:
-            await query.edit_message_text(text="Đang gửi phản hồi bằng audio...")
+            await query.edit_message_text(text=translation["sending_audio"])
         except Exception:
             pass
         tts_text = remove_urls(response_text)
-        tts_lang = "vi" if lang == "vi" else "en"
+        tts_lang = "vi" if detected_lang == "vi" else "en"
         audio_path = os.path.join(SAVE_DIR, f"response_{uuid.uuid4()}.mp3")
         try:
             tts = gTTS(tts_text, lang=tts_lang, slow=False)
             tts.save(audio_path)
         except Exception as e:
-            await context.bot.send_message(chat_id=query.message.chat_id, text=f"Lỗi khi tạo audio: {str(e)}")
+            await context.bot.send_message(chat_id=query.message.chat_id, text=f"{translation['audio_error']}, {str(e)} ")
             return ConversationHandler.END
         with open(audio_path, "rb") as audio_file:
-            await context.bot.send_voice(chat_id=query.message.chat_id, voice=audio_file)
+            await context.bot.send_audio(chat_id=query.message.chat_id, audio=audio_file, timeout=60)
         asyncio.create_task(delete_file_after_delay(audio_path))
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Xem Text", callback_data="convert_text"),
+            [InlineKeyboardButton(translation["show_text"], callback_data="convert_text"),
              InlineKeyboardButton("Refresh Token", callback_data="refresh_token")]])
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="Phản hồi bằng audio đã gửi. Nếu muốn xem văn bản, bấm nút dưới đây:",
+            text=translation["audio_sent"],
             reply_markup=keyboard
         )
 
     if is_initial:
         if total_used_tokens < MAX_TOKENS:
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Bạn có thể đặt câu hỏi tiếp theo:")
+            await context.bot.send_message(chat_id=query.message.chat_id, text=translation["ask_next"])
             return ASK_RESPONSE_TYPE
         else:
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Bạn đã hết token cho hội thoại này. Vui lòng khởi động lại bot.")
+            await context.bot.send_message(chat_id=query.message.chat_id, text=translation["chat_over"])
             return ConversationHandler.END
     else:
         return ASK_RESPONSE_TYPE
@@ -395,39 +473,32 @@ async def handle_response(update: Update, context):
 # ============================
 
 def main():
+
     app = Application.builder().token(TELE_TOKEN).build()
-
-    # ConversationHandler cho xác thực (đăng nhập/đăng ký)
-    auth_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start_auth),
-        CallbackQueryHandler(start_auth, pattern="^start_auth$")],
-
+    # ConversationHandler chính xử lý xác thực và Q&A.
+    conv_handler = ConversationHandler(
+        entry_points=[
+            # Chỉ khởi tạo bằng lệnh /start, không bắt mọi tin nhắn văn bản.
+            CommandHandler("start", auto_start)
+        ],
         states={
-            AUTH_CHOICE: [CallbackQueryHandler(auth_choice)],
+            CHOOSE_LANGUAGE: [CallbackQueryHandler(choose_language, pattern=r"^lang_")],
+            AUTH_CHOICE: [CallbackQueryHandler(auth_choice, pattern=r"^(login|register)$")],
             REGISTER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, register_id)],
             REGISTER_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, register_password)],
             REGISTER_GEMINI: [MessageHandler(filters.TEXT & ~filters.COMMAND, register_gemini)],
             LOGIN_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, login_id)],
             LOGIN_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, login_password)],
-        },
-        fallbacks=[],
-        allow_reentry=True  
-    )
-    app.add_handler(auth_handler)
-
-    # ConversationHandler cho phần hỏi đáp với API Gemini (yêu cầu người dùng đã đăng nhập)
-    qa_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, ask_response_type)],
-        states={
             ASK_RESPONSE_TYPE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ask_response_type),
                 CallbackQueryHandler(handle_response)
             ]
         },
-        fallbacks=[],
-        allow_reentry=True  
+        fallbacks=[CommandHandler("cancel", lambda update, context: ConversationHandler.END)],
+        allow_reentry=True
     )
-    app.add_handler(qa_handler)
+
+    app.add_handler(conv_handler)
     app.run_polling()
 
 if __name__ == "__main__":
