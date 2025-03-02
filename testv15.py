@@ -447,7 +447,7 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=query.message.chat_id, text=f"{translation['audio_error']}, {str(e)} ")
             return ConversationHandler.END
         with open(audio_path, "rb") as audio_file:
-            await context.bot.send_audio(chat_id=query.message.chat_id, audio=audio_file, timeout=60)
+            await context.bot.send_voice(chat_id=query.message.chat_id, voice=audio_file)
         asyncio.create_task(delete_file_after_delay(audio_path))
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(translation["show_text"], callback_data="convert_text"),
