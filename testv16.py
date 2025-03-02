@@ -143,7 +143,8 @@ async def auto_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Hiển thị chọn ngôn ngữ
         supported_languages = {
             "en": "English",
-            "vi": "Tiếng Việt"
+            "vi": "Tiếng Việt",
+            "ms": "Malaysia"
         }
         keyboard = [
             [InlineKeyboardButton(name, callback_data=f"lang_{code}")]
