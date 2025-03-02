@@ -10,3 +10,4 @@ xóa luôn /start và /stop người dùng ko cần dùng để bắt đầu v�
 - testv13.py thêm nút refresh token, gia hạn thời gian respone tránh time_out
 - testv14.py lưu trữ data người dùng thông qua xác thực đăng nhập và đăng ký 
 - testv15.py chuyển đổi đa dạng ngôn ngữ
+- testv16.py xóa "token còn lại" khỏi audio , xử lý lỗi time out
