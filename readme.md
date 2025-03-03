@@ -77,7 +77,7 @@
 ## Phát Triển & Góp Ý
 
 Nếu bạn có bất kỳ ý kiến đóng góp hoặc vấn đề gì cần báo cáo, vui lòng tạo issue trên GitHub repository hoặc liên hệ qua email: [thanhlam211204@gmail.com](mailto:thanhlam211204@gmail.com)
-[phanminhkhanh2004@gmail.com].(mailto:phanminhkhanh2004@gmail.com)
+[phanminhkhanh2004@gmail.com](mailto:phanminhkhanh2004@gmail.com)
 
 ## License
 
