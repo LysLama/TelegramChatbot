@@ -84,3 +84,5 @@ Nếu bạn có bất kỳ ý kiến đóng góp hoặc vấn đề gì cần b�
 Thông tin về bản quyền và giấy phép sử dụng dự án.
 
 ---
+
+conda install -c conda-forge ffmpeg
