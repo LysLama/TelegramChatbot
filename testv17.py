@@ -22,7 +22,7 @@ from telegram.ext import (
 import google.generativeai as genai
 from langdetect import detect, LangDetectException
 import speech_recognition as sr
-os.environ["FFMPEG_BINARY"] = r"D:\ffmpeg\bin\ffmpeg.exe"  # Thay bằng đường dẫn ffmpeg của bạn
+os.environ["FFMPEG_BINARY"] = r"/workspaces/TelegramChatbot/ffmpeg/bin/ffmpeg.exe"  # Thay bằng đường dẫn ffmpeg của bạn
 
 from pydub import AudioSegment
 
