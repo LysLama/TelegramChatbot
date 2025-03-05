@@ -1,7 +1,6 @@
 import os
-os.environ["FFMPEG_BINARY"] = r"D:\ffmpeg\bin\ffmpeg.exe"  # Đảm bảo đường dẫn này là chính xác
 from pydub import AudioSegment
-AudioSegment.converter = os.environ["FFMPEG_BINARY"]
+AudioSegment.converter = "ffmpeg"
 
 # In ra đường dẫn để xác nhận
 print("Đường dẫn ffmpeg: ", AudioSegment.converter)
