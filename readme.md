@@ -86,3 +86,7 @@ Thông tin về bản quyền và giấy phép sử dụng dự án.
 ---
 
 conda install -c conda-forge ffmpeg
+
+udo apt update
+
+sudo apt install ffmpeg
