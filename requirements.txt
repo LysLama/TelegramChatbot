@@ -4,3 +4,4 @@ langdetect==1.0.9
 python-telegram-bot==21.10
 python-dotenv==1.0.1
 google-generativeai==0.8.4
+SpeechRecognition==3.14.1
