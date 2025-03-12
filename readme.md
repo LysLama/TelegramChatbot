@@ -1,7 +1,3 @@
-Dưới đây là phiên bản cải tiến của file README.md, với cấu trúc rõ ràng, nội dung mạch lạc và hướng dẫn sử dụng cụ thể hơn:
-
----
-
 # Chatbot Telegram Đa Năng
 
 Chatbot Telegram Đa Năng là một giải pháp tương tác thông minh tích hợp đa dạng tính năng, cho phép người dùng trải nghiệm hội thoại linh hoạt qua cả văn bản và âm thanh. Với hỗ trợ đa ngôn ngữ (Tiếng Anh, Tiếng Việt, Malaysia) cùng chức năng xác thực và quản lý phiên làm việc, chatbot này hứa hẹn mang lại trải nghiệm mượt mà và an toàn cho người dùng.
@@ -85,5 +81,3 @@ Chúng tôi luôn trân trọng những ý kiến đóng góp để cải thiệ
 Thông tin về bản quyền và giấy phép sử dụng dự án được cung cấp trong file LICENSE (nếu có). Vui lòng tham khảo file này để biết thêm chi tiết về quyền sử dụng và phân phối.
 
 ---
-
-Với cấu trúc được sắp xếp khoa học cùng hướng dẫn cài đặt và sử dụng chi tiết, README này hi vọng sẽ giúp người dùng nhanh chóng làm quen và khai thác tối đa các tính năng của Chatbot Telegram Đa Năng.
