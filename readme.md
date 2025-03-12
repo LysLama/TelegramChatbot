@@ -34,9 +34,8 @@ Dự án này được thiết kế nhằm mang đến một trải nghiệm h�
 - **Giao Diện Tương Tác Thông Minh**
   - *Test v6:* Tích hợp inline keyboard cho phép người dùng lựa chọn giữa chế độ phản hồi âm thanh hoặc văn bản, đồng thời hỗ trợ tiếng Việt.
   - *Test v12:* Tự động chuyển đổi giữa audio và text sau khi trả kết quả,testv17.py
-   ```
 
-   Chatbot sẽ tự động kích hoạt và chờ tương tác từ người dùng.
+  + Chatbot sẽ tự động kích hoạt và chờ tương tác từ người dùng.
 
 2. **Chọn Chế Độ Phản Hồi:**  
    - Khi bắt đầu tương tác, inline keyboard sẽ hiển thị để bạn lựa chọn giữa phản hồi dạng âm thanh hoặc văn bản.
